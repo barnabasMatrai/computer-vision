@@ -1,40 +1,59 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.model_selection import train_test_split
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 import matplotlib.pyplot as plt
 from PIL import Image
 import os
 
+# ---------------- CONFIGURATION ----------------
+SEED = 42
+TEST_RATIO = 0.2
+BATCH_SIZE = 32
+NUM_EPOCHS = 50
+LEARNING_RATE = 1e-3
+
+torch.manual_seed(SEED)
+device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+print(f"device: {device}")
+
+
 # ---------------- DATA LOADING ----------------
 
-# Image preprocessing
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor()
+# Image preprocessing — train uses augmentation, test stays deterministic
+train_transform = transforms.Compose([
+    transforms.Resize((256, 256)),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomRotation(15),
+    transforms.ToTensor(),
 ])
 
-# Load dataset
-dataset = datasets.ImageFolder(
-    root="images",
-    transform=transform
+test_transform = transforms.Compose([
+    transforms.Resize((256, 256)),
+    transforms.ToTensor(),
+])
+
+# Two views of the same folder so train and test get different transforms
+train_dataset = datasets.ImageFolder(root="images", transform=train_transform)
+test_dataset = datasets.ImageFolder(root="images", transform=test_transform)
+num_classes = len(train_dataset.classes)
+
+# Stratified train/test split (same indices applied to both views)
+indices = list(range(len(train_dataset)))
+train_idx, test_idx = train_test_split(
+    indices,
+    test_size=TEST_RATIO,
+    stratify=train_dataset.targets,
+    random_state=SEED,
 )
 
-# Create batches
-loader = DataLoader(
-    dataset,
-    batch_size=32,
-    shuffle=True
-)
+train_set = Subset(train_dataset, train_idx)
+test_set = Subset(test_dataset, test_idx)
 
-# Class names
-print(dataset.classes)
-
-# Example batch
-images, labels = next(iter(loader))
-
-print(images.shape)   # torch.Size([32, 3, 224, 224])
-print(labels.shape)
-
-
+train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
+test_loader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False)
 
 # ----------------  DATA VISUALIZATION ----------------
 # Get all class folders
@@ -75,6 +94,7 @@ for i in range(len(class_folders)):
 plt.tight_layout()
 plt.show()
 
+
 # ---------------- DATASET ANALYSIS ----------------
 """
 In this section, we analyze the Freiburg Groceries Dataset to better understand.
@@ -91,21 +111,21 @@ distribution using a bar chart.
 """
 
 # print total number of images
-print("Total images:", len(dataset))
+print("Total images:", len(train_dataset))
 
 # print total number of classes
-print("Number of classes:", len(dataset.classes))
+print("Number of classes:", len(train_dataset.classes))
 
 # print all class names
 print("Class names:")
-print(dataset.classes)
+print(train_dataset.classes)
 
 # count images in each class
 print("\nImages per class:")
 
 class_counts = []
 
-for class_name in dataset.classes:
+for class_name in train_dataset.classes:
 
     # create path to class folder
     class_path = os.path.join("images", class_name)
@@ -120,7 +140,7 @@ for class_name in dataset.classes:
     print(class_name, ":", image_count)
 
 # open one sample image
-sample_class = dataset.classes[0]
+sample_class = train_dataset.classes[0]
 
 sample_folder = os.path.join("images", sample_class)
 
@@ -136,6 +156,7 @@ sample_image = Image.open(sample_image_path)
 # print image resolution
 print("\nImage resolution:", sample_image.size)
 
+
 # ---------------- CLASS DISTRIBUTION GRAPH ----------------
 
 """
@@ -144,7 +165,7 @@ In this section, we display one sample image from each class.
 plt.figure(figsize=(12,6))
 
 # create bar chart
-plt.bar(dataset.classes, class_counts)
+plt.bar(train_dataset.classes, class_counts)
 
 # rotate class names
 plt.xticks(rotation=90)
@@ -197,3 +218,80 @@ PREPROCESSING TO DO LIST
    - Ensure preprocessing works correctly
 
 """
+
+# ---------------- CNN MODEL ----------------
+# Simple CNN
+class SimpleCNN(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool2d(2)
+        self.relu = nn.ReLU()
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(64 * 28 * 28, 128)
+        self.dropout = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(128, num_classes)
+
+        
+    def forward(self, x):
+        x = self.pool(self.relu(self.conv1(x)))
+        x = self.pool(self.relu(self.conv2(x)))
+        x = self.pool(self.relu(self.conv3(x)))
+        x = self.flatten(x)
+        x = self.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.fc2(x)
+        return x
+
+# ---------------- LOSS FUNCTION AND OPTIMIZER ----------------
+model = SimpleCNN(num_classes).to(device)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer, mode="min", factor=0.5, patience=3
+)
+
+# ---------------- TRAINING LOOP ----------------
+# Training loop
+for epoch in range(1, NUM_EPOCHS + 1):
+    # --- train ---
+    model.train()
+    train_loss, train_correct, train_total = 0.0, 0, 0
+    for images, labels in train_loader:
+        images, labels = images.to(device), labels.to(device)
+
+        optimizer.zero_grad()
+        logits = model(images)
+        loss = criterion(logits, labels)
+        loss.backward()
+        optimizer.step()
+
+        train_loss += loss.item() * images.size(0)
+        train_correct += (logits.argmax(1) == labels).sum().item()
+        train_total += images.size(0)
+
+    # --- eval ---
+    model.eval()
+    test_loss, test_correct, test_total = 0.0, 0, 0
+    with torch.no_grad():
+        for images, labels in test_loader:
+            images, labels = images.to(device), labels.to(device)
+            logits = model(images)
+            loss = criterion(logits, labels)
+            test_loss += loss.item() * images.size(0)
+            test_correct += (logits.argmax(1) == labels).sum().item()
+            test_total += images.size(0)
+
+    avg_test_loss = test_loss / test_total
+    scheduler.step(avg_test_loss)
+    current_lr = optimizer.param_groups[0]["lr"]
+
+    print(f"epoch {epoch}/{NUM_EPOCHS} | "
+          f"train loss {train_loss / train_total:.4f} "
+          f"train acc {train_correct / train_total:.3f} | "
+          f"test loss {avg_test_loss:.4f} "
+          f"test acc {test_correct / test_total:.3f} | "
+          f"lr {current_lr:.1e}")
+

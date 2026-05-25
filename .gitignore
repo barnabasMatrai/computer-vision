@@ -221,3 +221,6 @@ __marimo__/
 
 # Dataset
 images/
+
+ # MacOS
+.DS_Store
