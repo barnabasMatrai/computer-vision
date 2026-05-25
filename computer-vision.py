@@ -7,8 +7,13 @@ from torch.utils.data import DataLoader, Subset
 import matplotlib.pyplot as plt
 from PIL import Image
 import os
-
+import random
 # ---------------- CONFIGURATION ----------------
+# In this section, we define the hyperparameters used for training.
+# These include the batch size, learning rate, number of epochs,
+# and the train/test split ratio.
+# We also set a random seed for reproducibility and select the device.
+
 SEED = 42
 TEST_RATIO = 0.2
 BATCH_SIZE = 32
@@ -19,29 +24,134 @@ torch.manual_seed(SEED)
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 print(f"device: {device}")
 
-
 # ---------------- DATA LOADING ----------------
+# Load original dataset without preprocessing
+dataset = datasets.ImageFolder(root="images")
 
-# Image preprocessing — train uses augmentation, test stays deterministic
+# Class names
+class_names = dataset.classes
+
+# Total number of classes
+num_classes = len(class_names)
+
+# ---------------- PREPROCESSING ----------------
+'''
+PREPROCESSING STEPS
+1. Resize all images to 224x224 
+- CNN models require the same input size 
+2. Convert images into tensors 
+- PyTorch works with tensor data 
+3. Normalize pixel values 
+- Makes training more stable 
+4. Apply data augmentation 
+- Helps reduce overfitting 
+- Creates more diverse training data 
+5. Apply random rotation 
+- Helps the model learn different angles 
+6. Apply random translation 
+- Helps the model recognize shifted objects 
+7. Apply random crop 
+- Helps the model focus on different parts of the object 
+8. Split dataset into training and testing sets 
+- Training set for learning - Test set for evaluation 
+9. Create DataLoaders 
+- Loads images in batches during training 
+10. Verify image shapes and labels 
+- Ensure preprocessing works correctly
+'''
+# Image preprocessing - train uses augmentation, test stays deterministic
 train_transform = transforms.Compose([
     transforms.Resize((256, 256)),
+    # Random horizontal flip
     transforms.RandomHorizontalFlip(),
+   # Random rotation
     transforms.RandomRotation(15),
+
+   # Random crop
+    transforms.RandomResizedCrop(
+        256,
+        scale=(0.8, 1.0)
+    ),
+    # Convert image to tensor
     transforms.ToTensor(),
+
+     # Normalize pixel values
+    transforms.Normalize(
+        mean=[0.5, 0.5, 0.5],
+        std=[0.5, 0.5, 0.5]
+    ),
 ])
 
+# Test preprocessing pipeline
 test_transform = transforms.Compose([
     transforms.Resize((256, 256)),
     transforms.ToTensor(),
+    transforms.Normalize(
+        mean=[0.5, 0.5, 0.5],
+        std=[0.5, 0.5, 0.5]
+    ),
 ])
 
+# Visualization preprocessing (without normalization)
+# Normalization is not applied here because it would make
+# the images appear darker during visualization.
+visualization_transform = transforms.Compose([
+    transforms.Resize((256, 256)),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomRotation(15),
+
+    transforms.RandomResizedCrop(
+        256,
+        scale=(0.8, 1.0)
+    ),
+
+    transforms.ToTensor(),
+])
+
+# ---------------- APPLY PREPROCESSING TO DATASETS ----------------
 # Two views of the same folder so train and test get different transforms
 train_dataset = datasets.ImageFolder(root="images", transform=train_transform)
 test_dataset = datasets.ImageFolder(root="images", transform=test_transform)
 num_classes = len(train_dataset.classes)
 
+# ---------------- PREPROCESSING VISUALIZATION ----------------
+fig, axes = plt.subplots(4, 2, figsize=(10,16))
+
+for i in range(4):
+
+    # Select class
+    class_name = class_names[i]
+
+    # Select image
+    image_path = os.path.join("images",class_name,random.choice(os.listdir(os.path.join("images", class_name))))
+
+    # Open image
+    original_image = Image.open(image_path)
+
+    # Apply preprocessing
+    processed_image = visualization_transform(original_image)
+
+    # Convert tensor for matplotlib
+    processed_image = processed_image.permute(1, 2, 0)
+
+    # Original image
+    axes[i, 0].imshow(original_image)
+    axes[i, 0].set_title(f"{class_name} - Before")
+    axes[i, 0].axis("off")
+
+    # Processed image
+    axes[i, 1].imshow(processed_image)
+    axes[i, 1].set_title(f"{class_name} - After")
+    axes[i, 1].axis("off")
+
+plt.subplots_adjust(hspace=0.6)
+plt.tight_layout()
+plt.show()
+
+# ---------------- TRAIN / TEST SPLIT ----------------
 # Stratified train/test split (same indices applied to both views)
 indices = list(range(len(train_dataset)))
+
 train_idx, test_idx = train_test_split(
     indices,
     test_size=TEST_RATIO,
@@ -55,6 +165,11 @@ test_set = Subset(test_dataset, test_idx)
 train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
 test_loader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False)
 
+# Verify image shapes and labels
+images, labels = next(iter(train_loader))
+
+print("Image batch shape:", images.shape)
+print("Label batch shape:", labels.shape)
 # ----------------  DATA VISUALIZATION ----------------
 # Get all class folders
 # We filtered hidden system files from the dataset directory, because macOS automatically creates files such as .DS_Store, which are not actual class folders.
@@ -180,44 +295,6 @@ plt.ylabel("Image Count")
 # show graph
 plt.show()
 
-# ---------------- PREPROCESSING ----------------
-
-"""
-PREPROCESSING TO DO LIST
-
-1. Resize all images to 224x224
-   - CNN models require the same input size
-
-2. Convert images into tensors
-   - PyTorch works with tensor data
-
-3. Normalize pixel values
-   - Makes training more stable
-
-4. Apply data augmentation
-   - Helps reduce overfitting
-   - Creates more diverse training data
-
-5. Apply random rotation
-   - Helps the model learn different angles
-
-6. Apply random translation
-   - Helps the model recognize shifted objects
-
-7. Apply random crop
-   - Helps the model focus on different parts of the object
-
-8. Split dataset into training and testing sets
-   - Training set for learning
-   - Test set for evaluation
-
-9. Create DataLoaders
-   - Loads images in batches during training
-
-10. Verify image shapes and labels
-   - Ensure preprocessing works correctly
-
-"""
 
 # ---------------- CNN MODEL ----------------
 # Simple CNN
