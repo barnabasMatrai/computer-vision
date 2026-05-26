@@ -48,7 +48,7 @@ class SimpleCNN(nn.Module):
 # ---------------- MAIN ----------------
 if __name__ == "__main__":
 
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
     print(f"device: {device}")
 
     # ---------------- DATA LOADING ----------------
