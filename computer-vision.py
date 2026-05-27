@@ -10,16 +10,24 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import os
 import random
+from sklearn.metrics import confusion_matrix
+
 # ---------------- CONFIGURATION ----------------
 # In this section, we define the hyperparameters used for training.
 # These include the batch size, learning rate, number of epochs,
 # and the train/test split ratio.
 # We also set a random seed for reproducibility and select the device.
 
+
 SEED = 42
+# %80 training, %20 testing
 TEST_RATIO = 0.2
+# batch size defines how many images are processed together in one training step.
 BATCH_SIZE = 32
-NUM_EPOCHS = 50
+# epoch means one complete pass through the training dataset.
+# We trained the model for 50 epochs to give it enough time to learn meaningful patterns.
+NUM_EPOCHS = 5
+# learning rate controls how strongly the model updates its weights during training.
 LEARNING_RATE = 1e-3
 
 torch.manual_seed(SEED)
@@ -58,8 +66,6 @@ PREPROCESSING STEPS
 - Training set for learning - Test set for evaluation 
 9. Create DataLoaders 
 - Loads images in batches during training 
-10. Verify image shapes and labels 
-- Ensure preprocessing works correctly
 '''
 # Image preprocessing - train uses augmentation, test stays deterministic
 train_transform = transforms.Compose([
@@ -81,7 +87,7 @@ train_transform = transforms.Compose([
         translate=(0.1, 0.1)
     ),
 
-    # sharpen (PIL-based → must stay before ToTensor)
+    # sharpen (PIL-based -> must stay before ToTensor)
     transforms.Lambda(lambda img: img.filter(ImageFilter.SHARPEN)),
 
     # convert to tensor
@@ -190,6 +196,7 @@ images, labels = next(iter(train_loader))
 
 print("Image batch shape:", images.shape)
 print("Label batch shape:", labels.shape)
+
 # ----------------  DATA VISUALIZATION ----------------
 # Get all class folders
 # We filtered hidden system files from the dataset directory, because macOS automatically creates files such as .DS_Store, which are not actual class folders.
@@ -341,6 +348,11 @@ class SimpleCNN(nn.Module):
         x = self.dropout(x)
         x = self.fc2(x)
         return x
+# ---------------- TRAINING HISTORY ----------------
+
+train_acc_history = []
+test_acc_history = []
+
 
 # ---------------- LOSS FUNCTION AND OPTIMIZER ----------------
 model = SimpleCNN(num_classes).to(device)
@@ -351,6 +363,8 @@ scheduler = optim.lr_scheduler.ReduceLROnPlateau(
 )
 
 # ---------------- TRAINING LOOP ----------------
+all_predictions = []
+all_labels = []
 # Training loop
 for epoch in range(1, NUM_EPOCHS + 1):
     # --- train ---
@@ -376,6 +390,9 @@ for epoch in range(1, NUM_EPOCHS + 1):
         for images, labels in test_loader:
             images, labels = images.to(device), labels.to(device)
             logits = model(images)
+            predictions = logits.argmax(1)
+            all_predictions.extend(predictions.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
             loss = criterion(logits, labels)
             test_loss += loss.item() * images.size(0)
             test_correct += (logits.argmax(1) == labels).sum().item()
@@ -391,4 +408,50 @@ for epoch in range(1, NUM_EPOCHS + 1):
           f"test loss {avg_test_loss:.4f} "
           f"test acc {test_correct / test_total:.3f} | "
           f"lr {current_lr:.1e}")
+    # Save metrics for visualization
+    train_acc_history.append(train_correct / train_total)
+    test_acc_history.append(test_correct / test_total)
+    
 
+
+
+# ---------------- ACCURACY GRAPH ----------------
+#accuracy graph shows how the model performance changes during training over multiple epochs.
+#if both training and test accuracy improve over time, we can say, model is learning successfully.
+#if the training accuracy continues to increase while the test accuracy stops improving or decreases, this may indicate overfitting.
+
+plt.figure(figsize=(10,5))
+
+epochs = range(1, NUM_EPOCHS + 1)
+
+plt.plot(train_acc_history, label="Train Accuracy")
+plt.plot(test_acc_history, label="Test Accuracy")
+
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
+
+plt.title("Training and Test Accuracy")
+
+plt.legend()
+
+plt.show()
+
+# ---------------- CONFUSION MATRIX ----------------
+# cm helps identify which classes are predicted correctly and which classes are not
+cm = confusion_matrix(all_labels, all_predictions)
+
+plt.figure(figsize=(12,10))
+
+plt.imshow(cm, cmap="Blues")
+
+plt.xticks(range(len(class_names)), class_names, rotation=90)
+plt.yticks(range(len(class_names)), class_names)
+
+plt.title("Confusion Matrix")
+
+plt.xlabel("Predicted Label")
+plt.ylabel("True Label")
+
+plt.colorbar()
+
+plt.show()
