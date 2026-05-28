@@ -25,7 +25,6 @@ TEST_RATIO = 0.2
 # batch size defines how many images are processed together in one training step.
 BATCH_SIZE = 32
 # epoch means one complete pass through the training dataset.
-# We trained the model for 50 epochs to give it enough time to learn meaningful patterns.
 NUM_EPOCHS = 50
 # learning rate controls how strongly the model updates its weights during training.
 LEARNING_RATE = 1e-3
@@ -42,13 +41,14 @@ print(f"device: {device}")
 # ---------------- DATA LOADING ----------------
 
 # Load original dataset without preprocessing
+# ImageFolder function reads all subfolders inside the images directory
+# and uses folder names as class labels
+# ImageFolder is provided by the torchvision library.
 dataset = datasets.ImageFolder(root="images")
 
-# Class names
+# .classes returns the list of category names found in the dataset.
 class_names = dataset.classes
 
-# Total number of classes
-num_classes = len(class_names)
 
 # ---------------- PREPROCESSING ----------------
 # !!!The preprocessing pipeline is separated into two different parts: train_transform and test_transform.
@@ -59,54 +59,74 @@ These transformations randomly modify the training images by rotating, cropping 
 This helps create more diverse training data and reduces overfitting.
 '''
 # Image preprocessing - train uses augmentation, test stays deterministic
+# Compose is used to apply several image transformations step by step.
 train_transform = transforms.Compose([
+    # RESIZE standardizes image dimensions before training the CNN model
     transforms.Resize((256, 256)),
 
-    # rotation
+    # ROTATION
+    #randomly rotate the image between -15 and +15
+    #One time the image might be rotated: +8 (clockwise) and another time: -12 (counterclockwise)
+    #So the same image can appear differently in different epochs.
+    #Every epoch, the same image can be loaded again with a different random rotation. For example, the image might be rotated by +5 in one epoch and by -12 in another epoc
     transforms.RandomRotation(15),
 
-    # crop
-    transforms.RandomResizedCrop(
-        256,
-        scale=(0.8, 1.0),
-        interpolation=InterpolationMode.BILINEAR
-    ),
+    # CROP
+    # Randomly selects and crops a region of the image
+    # between 80% and 100% of the original size,
+    # then resizes it to 256x256 pixels.
+    #When an image is resized, the number of pixels changes. Because of this, the model needs a method to calculate the values of the new pixels and uses bilinear interpolation for this calculation.
+    #Bilinear interpolation calculates new pixel values by looking at the neighboring pixels around them
+    transforms.RandomResizedCrop(256, scale=(0.8, 1.0),interpolation=InterpolationMode.BILINEAR),
 
-    # translation (shift)
-    transforms.RandomAffine(
-        degrees=0,
-        translate=(0.1, 0.1)
-    ),
-
-    # sharpen (PIL-based -> must stay before ToTensor)
+    # TRANSLATION (SHIFT)
+    # degrees=0 means that no rotation is applied. The image is not rotated and only translation is performed.
+    # translate=(0.1, 0.1) = image can be randomly shifted by up to 10% of its width and height.
+    # For example, with a 256×256 image: 256 × 0.1 ≈ 25 pixels 
+    # So the image may be shifted: left or right by about 25 pixels OR up or down by about 25 pixels.
+    # The transformation is random and can change every epoch.
+    transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+    
+    #SHARPEN
+    # This transformation sharpens the image before it is converted into a tensor.
+    # ImageFilter.SHARPEN is a PIL image filter that increases edge contrast and makes details appear clearer and more defined. For example, object borders and textures may become slightly more visible after sharpening.
+    # The transformation is wrapped inside transforms.Lambda(...)
+     #because PyTorch does not provide a built-in sharpen transform directly in torchvision.transforms
     transforms.Lambda(lambda img: img.filter(ImageFilter.SHARPEN)),
 
     # convert to tensor
+    # At the beginning, the image is a normal PIL image object created by:Image.open(...)
+    # A PIL image is mainly used for image processing operations such as:filtering, cropping, resizing, etc.
+    # However, a CNN cannot work directly with a PIL image. Neural networks require numerical data that can be processed mathematically.
+    # ToTensor() mainly does two things:
+    # 1. converts the image into a PyTorch tensor,
+    # 2. scales the pixel values from 0–255 to the range 0.0–1.0.
+    # and the CNN can use for matrix multiplications, forward and backward propagation.
+    # After ToTensor(), the image becomes a multidimensional numerical array called a tensor.
+    # for exampe an RGB image becomes: [3, 256, 256]
+    # grayscale image may become: [256, 256]
     transforms.ToTensor(),
 
     # normalize
-    transforms.Normalize(
-        mean=[0.5, 0.5, 0.5],
-        std=[0.5, 0.5, 0.5]
-    ),
+    # Normalization is applied after ToTensor() because normalization requires numerical tensor values, not a normal PIL image.
+    # It may look unnecessary at first because ToTensor() already scales the pixel values to the range 0.0–1.0.
+    # However, normalization is still useful because CNNs usually train more efficiently when the input values are centered around zero rather than containing only positive values.
+    #ToTensor() -> scales values
+    #Normalize() -> centers and standardizes values
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+    #An RGB image tensor usually has this structure: [3, height, width]
+    # PyTorch normalizes each channel separately. So Normalize(mean=[R,G,B], std=[R,G,B])
+    #channel 0 → Red , channel 1 → Green , channel 2 → Blue
+    
 ])
 
 # Test preprocessing pipeline
-'''
-test_transform pipeline does not use random augmentation because 
-the test set should stay fixed 
-and is used to measure the real performance of the CNN model.
-During testing, we want the same test images every time so that the evaluation stays fair and consistent. 
-If random transformations such as rotation, crop or translation were also applied to the test images,
-the same image could appear differently in every test run, which could change the accuracy results.
-'''
+
+
 test_transform = transforms.Compose([
     transforms.Resize((256, 256)),
     transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.5, 0.5, 0.5],
-        std=[0.5, 0.5, 0.5]
-    ),
+    transforms.Normalize(mean=[0.5, 0.5, 0.5],std=[0.5, 0.5, 0.5]),
 ])
 
 # Visualization preprocessing (without normalization)
@@ -134,8 +154,21 @@ visualization_transform = transforms.Compose([
 ])
 
 # ---------------- APPLY PREPROCESSING TO DATASETS ----------------
-# Two views of the same folder so train and test get different transforms
+'''
+Why are there two ImageFolder datasets?
+Because:
+- train should receive augmentation
+- test should not receive augmentation
+Then, train_idx and test_idx determine which images belong to the training set and which belong to the test set.
+'''
+
 train_dataset = datasets.ImageFolder(root="images", transform=train_transform)
+'''
+means:
+Read the images folder
+and apply the train_transform pipeline
+as each image is loaded
+'''
 test_dataset = datasets.ImageFolder(root="images", transform=test_transform)
 num_classes = len(train_dataset.classes)
 
@@ -175,23 +208,36 @@ plt.show()
 
 # ---------------- TRAIN / TEST SPLIT ----------------
 # Stratified train/test split (same indices applied to both views)
+'''
+Even though both ImageFolder datasets initially read have ALL images, train_test_split() creates different index lists.
+Each image index is assigned either to train_idx or to test_idx, not both.
+After that, Subset uses these indices to create separate train and test sets.
+So the same image cannot appear in both the training set and the test set.
+'''
+#creates all image numbers: [0, 1, 2, 3]
 indices = list(range(len(train_dataset)))
 
-train_idx, test_idx = train_test_split(
-    indices,
-    test_size=TEST_RATIO,
-    stratify=train_dataset.targets,
-    random_state=SEED,
-)
+#splits these numbers:
+#train_idx = [0, 1]
+#test_idx = [2, 3]
+train_idx, test_idx = train_test_split(indices,test_size=TEST_RATIO,stratify=train_dataset.targets,random_state=SEED,)
 
+#means: use train_dataset, but only images with train_idx. These images get train_transform.
 train_set = Subset(train_dataset, train_idx)
 test_set = Subset(test_dataset, test_idx)
 
+#DataLoader is a PyTorch utility that loads the dataset and sends the data to the CNN during the training and testing phases.
+#DataLoader is responsible for:loading images, creating batches, and sending the batches to the CNN during training/testing.
+#If the training set contains 320 images and: batch_size = 32 then 320 / 32 = 10 batches per epoch.  CNN processes one batch at a time.
+#Why is shuffle=True used for training? it randomly changes the order of the training images every epoch. This is important because if the CNN always sees images in the exact same order, it may learn order-related patterns
+# and because
+# gradient is calculated based on the batch. If the batch consistently consists of the same class, the gradient may be biased in the direction of that class.
 train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
+#During testing, randomness is unnecessary because:weights are no longer updated, gradients are not calculated, and CNN is only performing evaluation.
 test_loader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False)
-
 # Verify image shapes and labels
 images, labels = next(iter(train_loader))
+
 
 print("Image batch shape:", images.shape)
 print("Label batch shape:", labels.shape)
@@ -287,10 +333,7 @@ sample_folder = os.path.join("images", sample_class)
 
 sample_image_name = os.listdir(sample_folder)[0]
 
-sample_image_path = os.path.join(
-    sample_folder,
-    sample_image_name
-)
+sample_image_path = os.path.join(sample_folder, sample_image_name)
 
 sample_image = Image.open(sample_image_path)
 
@@ -323,7 +366,7 @@ plt.show()
 
 
 # ---------------- CNN MODEL ----------------
-# Simple CNN
+
 class SimpleCNN(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
@@ -367,7 +410,7 @@ scheduler = optim.lr_scheduler.ReduceLROnPlateau(
 best_loss = float("inf")
 
 patience_counter = 0
-
+#If the validation/test loss does not improve for 5 consecutive epochs, the training process is stopped.
 PATIENCE = 5
 
 # ---------------- TRAINING LOOP ----------------
@@ -480,4 +523,4 @@ plt.ylabel("True Label")
 
 plt.colorbar()
 
-plt.show()i
+plt.show()
