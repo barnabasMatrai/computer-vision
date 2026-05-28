@@ -26,15 +26,21 @@ TEST_RATIO = 0.2
 BATCH_SIZE = 32
 # epoch means one complete pass through the training dataset.
 # We trained the model for 50 epochs to give it enough time to learn meaningful patterns.
-NUM_EPOCHS = 5
+NUM_EPOCHS = 50
 # learning rate controls how strongly the model updates its weights during training.
 LEARNING_RATE = 1e-3
 
 torch.manual_seed(SEED)
+
+#it selects which hardware device will be used for training the CNN model.
+# code first checks whether MPS is available. If MPS is available, the model uses the Apple GPU for faster training.
+# otherwise, the code switches to CUDA, which is NVIDIA’s GPU acceleration platform commonly used on Windows and Linux systems with NVIDIA graphics cards.
+# using GPU acceleration is important because CNN training requires many mathematical operations, and GPUs can process these operations much faster than CPUs.
 device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
 print(f"device: {device}")
 
 # ---------------- DATA LOADING ----------------
+
 # Load original dataset without preprocessing
 dataset = datasets.ImageFolder(root="images")
 
@@ -45,27 +51,12 @@ class_names = dataset.classes
 num_classes = len(class_names)
 
 # ---------------- PREPROCESSING ----------------
+# !!!The preprocessing pipeline is separated into two different parts: train_transform and test_transform.
 '''
-PREPROCESSING STEPS
-1. Resize all images to 224x224 
-- CNN models require the same input size 
-2. Convert images into tensors 
-- PyTorch works with tensor data 
-3. Normalize pixel values 
-- Makes training more stable 
-4. Apply data augmentation 
-- Helps reduce overfitting 
-- Creates more diverse training data 
-5. Apply random rotation 
-- Helps the model learn different angles 
-6. Apply random translation 
-- Helps the model recognize shifted objects 
-7. Apply random crop 
-- Helps the model focus on different parts of the object 
-8. Split dataset into training and testing sets 
-- Training set for learning - Test set for evaluation 
-9. Create DataLoaders 
-- Loads images in batches during training 
+train_transform contains data augmentation operations 
+such as RandomRotation, RandomResizedCrop and RandomAffine. 
+These transformations randomly modify the training images by rotating, cropping and shifting them. 
+This helps create more diverse training data and reduces overfitting.
 '''
 # Image preprocessing - train uses augmentation, test stays deterministic
 train_transform = transforms.Compose([
@@ -101,6 +92,14 @@ train_transform = transforms.Compose([
 ])
 
 # Test preprocessing pipeline
+'''
+test_transform pipeline does not use random augmentation because 
+the test set should stay fixed 
+and is used to measure the real performance of the CNN model.
+During testing, we want the same test images every time so that the evaluation stays fair and consistent. 
+If random transformations such as rotation, crop or translation were also applied to the test images,
+the same image could appear differently in every test run, which could change the accuracy results.
+'''
 test_transform = transforms.Compose([
     transforms.Resize((256, 256)),
     transforms.ToTensor(),
@@ -358,9 +357,18 @@ test_acc_history = []
 model = SimpleCNN(num_classes).to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, mode="min", factor=0.5, patience=3
 )
+
+# ---------------- EARLY STOPPING ----------------
+
+best_loss = float("inf")
+
+patience_counter = 0
+
+PATIENCE = 5
 
 # ---------------- TRAINING LOOP ----------------
 all_predictions = []
@@ -399,6 +407,24 @@ for epoch in range(1, NUM_EPOCHS + 1):
             test_total += images.size(0)
 
     avg_test_loss = test_loss / test_total
+
+    # ---------------- EARLY STOPPING CHECK ----------------
+
+    if avg_test_loss < best_loss:
+
+        best_loss = avg_test_loss
+        patience_counter = 0
+
+    else:
+
+        patience_counter += 1
+
+    if patience_counter >= PATIENCE:
+
+        print("Early stopping triggered.")
+
+        break
+    
     scheduler.step(avg_test_loss)
     current_lr = optimizer.param_groups[0]["lr"]
 
@@ -454,4 +480,4 @@ plt.ylabel("True Label")
 
 plt.colorbar()
 
-plt.show()
+plt.show()i
