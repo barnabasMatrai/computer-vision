@@ -13,6 +13,8 @@ import random
 from sklearn.metrics import confusion_matrix
 
 '''
+compute class weight import TO DO
+
 Dataset Description:
 We used the Freiburg Groceries Dataset, which contains grocery product images from 25 different classes. 
 The dataset was provided in the Computer Vision course materials and is publicly available from the University of Freiburg. 
@@ -426,6 +428,19 @@ train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
 test_loader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False)
 
 # ---------------- CNN MODEL ----------------
+''' 
+In this project, we used PyTorch instead of TensorFlow to build and train our CNN model.
+PyTorch provides things such as: 
+- nn.Conv2d 
+- nn.MaxPool2d 
+- nn.Linear 
+- nn.ReLU
+
+In our implementation, we created our CNN architecture inside a class called SimpleCNN.
+This class inherits from nn.Module, which is the base class used for neural networks in PyTorch.
+
+Inside this class, we define all CNN layers such as convolution layers, pooling layers and fully connected layers.
+'''
 
 class SimpleCNN(nn.Module):
     def __init__(self, num_classes):
