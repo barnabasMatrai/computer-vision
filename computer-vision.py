@@ -11,9 +11,9 @@ from PIL import Image
 import os
 import random
 from sklearn.metrics import confusion_matrix
+from sklearn.utils.class_weight import compute_class_weight
 
 '''
-compute class weight import TO DO
 
 Dataset Description:
 We used the Freiburg Groceries Dataset, which contains grocery product images from 25 different classes. 
@@ -413,6 +413,26 @@ So both datasets share the same original image folder, but:
 train_set = Subset(train_dataset, train_idx)
 test_set = Subset(test_dataset, test_idx)
 
+# ---------------- HANDLING CLASS IMBALANCE ----------------
+'''
+Our dataset contains slight class imbalance,
+because some categories contain more images than others. 
+compute_class_weight() helps reduce this imbalance 
+by assigning larger weights to smaller classes 
+and smaller weights to larger classes. 
+'''
+# Calculate class weights to help reduce class imbalance
+class_weights = compute_class_weight(class_weight="balanced",classes=list(range(num_classes)),y=train_dataset.targets)
+
+# Convert weights into PyTorch tensor 
+# because CrossEntropyLoss expects tensor input
+class_weights = torch.tensor(class_weights,dtype=torch.float).to(device)
+
+print("Class weights:")
+print(class_weights)
+
+
+
 '''
 DataLoader is responsible for loading the dataset in smaller batches during CNN training and testing.
 The train_loader is used during training. Here shuffle=True is enabled.
@@ -470,10 +490,13 @@ class SimpleCNN(nn.Module):
 train_acc_history = []
 test_acc_history = []
 
-
 # ---------------- LOSS FUNCTION AND OPTIMIZER ----------------
 model = SimpleCNN(num_classes).to(device)
-criterion = nn.CrossEntropyLoss()
+'''
+By passing class_weights into CrossEntropyLoss,
+smaller classes become more important during training.
+'''
+criterion = nn.CrossEntropyLoss(weight=class_weights)
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(
