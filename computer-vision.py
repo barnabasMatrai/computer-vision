@@ -154,21 +154,21 @@ exist in each category.
 '''
 
 # print total number of images
-print("Total images:", len(train_dataset))
+print("Total images:", len(dataset))
 
 # print total number of classes
-print("Number of classes:", len(train_dataset.classes))
+print("Number of classes:", len(class_names))
 
 # print all class names
 print("Class names:")
-print(train_dataset.classes)
+print(class_names)
 
 # count images in each class
 print("\nImages per class:")
 
 class_counts = []
 
-for class_name in train_dataset.classes:
+for class_name in dataset.classes:
 
     # create path to class folder
     class_path = os.path.join("images", class_name)
@@ -183,7 +183,7 @@ for class_name in train_dataset.classes:
     print(class_name, ":", image_count)
 
 # open one sample image
-sample_class = train_dataset.classes[0]
+sample_class = class_names[0]
 
 sample_folder = os.path.join("images", sample_class)
 
@@ -214,7 +214,7 @@ As a result, the model may achieve lower prediction accuracy for smaller classes
 plt.figure(figsize=(12,6))
 
 # create bar chart
-plt.bar(train_dataset.classes, class_counts)
+plt.bar(dataset.classes, class_counts)
 
 # rotate class names
 plt.xticks(rotation=90)
