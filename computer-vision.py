@@ -86,6 +86,17 @@ LEARNING_RATE = 1e-3
 
 torch.manual_seed(SEED)
 
+
+# ---------------- GRID SEARCH OPTIONS ----------------
+# We experiment with different batch sizes and epoch counts # to find a better training configuration for the CNN model.
+
+batch_size_options = [32, 64]
+
+epoch_options = [10, 20, 30, 40, 50]
+
+
+
+
 #it selects which hardware device will be used for training the CNN model.
 # code first checks whether MPS is available. If MPS is available, the model uses the Apple GPU for faster training.
 # otherwise, the code switches to CUDA, which is NVIDIA’s GPU acceleration platform commonly used on Windows and Linux systems with NVIDIA graphics cards.
@@ -413,20 +424,6 @@ So both datasets share the same original image folder, but:
 train_set = Subset(train_dataset, train_idx)
 test_set = Subset(test_dataset, test_idx)
 
-'''
-DataLoader is responsible for loading the dataset in smaller batches during CNN training and testing.
-The train_loader is used during training. Here shuffle=True is enabled.
-This means the image order is randomized at the beginning of every epoch.
-For example, during epoch 1,  CNN may first see water, coffee, cereal, vinegar. During epoch 2, the order may become: juice, pasta, milk, tea.
-This is important because if the CNN always sees images in the exact same order, the model may start learning order-related patterns.
-
-For the test_loader, shuffle=False is used. 
-Because during testing, model is not learning anymore. It is only making predictions.
-Because of this, there is no advantage in randomizing the image order.
-'''
-train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
-test_loader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False)
-
 # ---------------- CNN MODEL ----------------
 ''' 
 In this project, we used PyTorch instead of TensorFlow to build and train our CNN model.
@@ -471,17 +468,129 @@ train_acc_history = []
 test_acc_history = []
 
 
+# ---------------- FINDING THE BEST BATCH SIZE AND EPOCH COUNT with grid search ----------------
+best_accuracy = 0
+
+best_batch_size = None
+best_epoch_count = None
+
+for batch_size in batch_size_options:
+
+    for epoch_count in epoch_options:
+
+        print("\nTesting configuration:")
+        print("Batch size:", batch_size)
+        print("Epoch count:", epoch_count)
+
+        # Create dataloaders for current configuration
+        train_loader = DataLoader(
+            train_set,
+            batch_size=batch_size,
+            shuffle=True
+        )
+
+        test_loader = DataLoader(
+            test_set,
+            batch_size=batch_size,
+            shuffle=False
+        )
+
+        # Recreate CNN model for every configuration
+        model = SimpleCNN(num_classes).to(device)
+
+        criterion = nn.CrossEntropyLoss()
+
+        optimizer = optim.Adam(
+            model.parameters(),
+            lr=LEARNING_RATE
+        )
+
+        # Small training loop
+        for epoch in range(epoch_count):
+
+            model.train()
+
+            for images, labels in train_loader:
+
+                images = images.to(device)
+                labels = labels.to(device)
+
+                optimizer.zero_grad()
+
+                logits = model(images)
+
+                loss = criterion(logits, labels)
+
+                loss.backward()
+
+                optimizer.step()
+
+        # Evaluation
+        model.eval()
+
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+
+            for images, labels in test_loader:
+
+                images = images.to(device)
+                labels = labels.to(device)
+
+                logits = model(images)
+
+                predictions = logits.argmax(1)
+
+                correct += (predictions == labels).sum().item()
+
+                total += labels.size(0)
+
+        accuracy = correct / total
+
+        print("Accuracy:", accuracy)
+
+        if accuracy > best_accuracy:
+
+            best_accuracy = accuracy
+
+            best_batch_size = batch_size
+
+            best_epoch_count = epoch_count
+
+print("\nBest configuration found:")
+
+print("Best batch size:", best_batch_size)
+
+print("Best epoch count:", best_epoch_count)
+
+print("Best accuracy:", best_accuracy)
+
+# Create final dataloaders using the best configuration
+'''
+DataLoader is responsible for loading the dataset in smaller batches during CNN training and testing.
+The train_loader is used during training. Here shuffle=True is enabled.
+This means the image order is randomized at the beginning of every epoch.
+For example, during epoch 1,  CNN may first see water, coffee, cereal, vinegar. During epoch 2, the order may become: juice, pasta, milk, tea.
+This is important because if the CNN always sees images in the exact same order, the model may start learning order-related patterns.
+
+For the test_loader, shuffle=False is used. 
+Because during testing, model is not learning anymore. It is only making predictions.
+Because of this, there is no advantage in randomizing the image order.
+'''
+train_loader = DataLoader(train_set, batch_size=best_batch_size, shuffle=True)
+test_loader = DataLoader(test_set, batch_size=best_batch_size, shuffle=False)
+
 # ---------------- LOSS FUNCTION AND OPTIMIZER ----------------
 model = SimpleCNN(num_classes).to(device)
+
 criterion = nn.CrossEntropyLoss()
+
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-    optimizer, mode="min", factor=0.5, patience=3
-)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau( optimizer, mode="min", factor=0.5, patience=3)
 
 # ---------------- EARLY STOPPING ----------------
-
 best_loss = float("inf")
 
 patience_counter = 0
@@ -492,7 +601,7 @@ PATIENCE = 5
 all_predictions = []
 all_labels = []
 # Training loop
-for epoch in range(1, NUM_EPOCHS + 1):
+for epoch in range(1, best_epoch_count + 1):
     # --- train ---
     model.train()
     train_loss, train_correct, train_total = 0.0, 0, 0
