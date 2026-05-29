@@ -591,8 +591,8 @@ plt.figure(figsize=(10,5))
 
 epochs = range(1, NUM_EPOCHS + 1)
 
-plt.plot(train_acc_history, label="Train Accuracy")
-plt.plot(test_acc_history, label="Test Accuracy")
+plt.plot(epochs, train_acc_history, label="Train Accuracy")
+plt.plot(epochs, test_acc_history, label="Test Accuracy")
 
 plt.xlabel("Epoch")
 plt.ylabel("Accuracy")
@@ -609,7 +609,7 @@ cm = confusion_matrix(all_labels, all_predictions)
 
 plt.figure(figsize=(12,10))
 
-plt.imshow(cm, cmap="Blues")
+plt.imshow(cm, cmap="Reds")
 
 plt.xticks(range(len(class_names)), class_names, rotation=90)
 plt.yticks(range(len(class_names)), class_names)
@@ -619,6 +619,7 @@ plt.title("Confusion Matrix")
 plt.xlabel("Predicted Label")
 plt.ylabel("True Label")
 
+# Add color scale bar
 plt.colorbar()
-
+# Show graph
 plt.show()
