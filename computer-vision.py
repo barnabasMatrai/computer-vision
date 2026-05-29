@@ -465,17 +465,30 @@ Inside this class, we define all CNN layers such as convolution layers, pooling 
 class SimpleCNN(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
+        # First convolution layer
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, padding=1)
+        # Second convolution layer
         self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
+        # Third convolution layer
         self.conv3 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        # Max pooling layer
         self.pool = nn.MaxPool2d(2)
+        # ReLU activation introduces non-linearity
         self.relu = nn.ReLU()
+        # Flatten converts multi-dimensional feature maps into a one-dimensional vector
+        # because fully connected layers expect vector input
         self.flatten = nn.Flatten()
+        # First fully connected layer
         self.fc1 = nn.Linear(64 * 32 * 32, 128)
         self.dropout = nn.Dropout(0.5)
+        # Final output layer
         self.fc2 = nn.Linear(128, num_classes)
 
-        
+    # forward() defines how image data moves through the CNN model.
+    # forward() is automatically called when we use: model(images)
+    # For example: logits = model(images)
+    # Internally, PyTorch automatically runs: model.forward(images)
+    # Because of this, we  do not call forward() manually.
     def forward(self, x):
         x = self.pool(self.relu(self.conv1(x)))
         x = self.pool(self.relu(self.conv2(x)))
@@ -485,25 +498,43 @@ class SimpleCNN(nn.Module):
         x = self.dropout(x)
         x = self.fc2(x)
         return x
-# ---------------- TRAINING HISTORY ----------------
+
+# ---------------- LOSS FUNCTION AND OPTIMIZER ----------------
+# Create CNN model and move it to the selected device
+model = SimpleCNN(num_classes).to(device)
+
+'''
+CrossEntropyLoss is the loss function used for multi-class image classification problems. 
+Loss function measures how different the CNN predictions are from the correct labels.
+We also pass class_weights into CrossEntropyLoss.
+By passing class_weights into CrossEntropyLoss,smaller classes become more important during training.
+'''
+criterion = nn.CrossEntropyLoss(weight=class_weights)
+
+''' 
+Adam is the optimizer responsible for updating the CNN weights during training.
+After backpropagation calculates gradients, Adam uses these gradients to adjust the weights in order to reduce the loss.
+loss.backward()
+'''
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+''' 
+ReduceLROnPlateau automatically reduces the learning rate when the test/validation loss stops improving. 
+mode="min" -> scheduler expects the monitored value to decrease. 
+factor=0.5 -> learning rate becomes half its previous value. 
+patience=3 -> scheduler waits 3 epochs without improvement before reducing the learning rate. 
+'''
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
+
+# ---------------- ACCURACY HISTORY ----------------
 
 train_acc_history = []
 test_acc_history = []
 
-# ---------------- LOSS FUNCTION AND OPTIMIZER ----------------
-model = SimpleCNN(num_classes).to(device)
-'''
-By passing class_weights into CrossEntropyLoss,
-smaller classes become more important during training.
-'''
-criterion = nn.CrossEntropyLoss(weight=class_weights)
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-    optimizer, mode="min", factor=0.5, patience=3
-)
-
 # ---------------- EARLY STOPPING ----------------
+# Early stopping helps prevent overfitting. 
+# If the test loss stops improving for several epochs, 
+# training is stopped automatically.
 
 best_loss = float("inf")
 
@@ -514,9 +545,10 @@ PATIENCE = 5
 # ---------------- TRAINING LOOP ----------------
 all_predictions = []
 all_labels = []
+
 # Training loop
 for epoch in range(1, NUM_EPOCHS + 1):
-    # --- train ---
+    # train
     model.train()
     train_loss, train_correct, train_total = 0.0, 0, 0
     for images, labels in train_loader:
@@ -533,16 +565,30 @@ for epoch in range(1, NUM_EPOCHS + 1):
         train_total += images.size(0)
 
     # --- eval ---
+    # During evaluation: 
+    # - dropout is disabled 
+    # - weights are not updated 
+    # - model only performs predictions
     model.eval()
+    
     test_loss, test_correct, test_total = 0.0, 0, 0
+
+    # torch.no_grad(): 
+    # - disables gradient calculation during evaluation/testing.
+    # - makes evaluation faster
+    # This is important because backpropagation is only needed during training.
     with torch.no_grad():
+        # Iterate through the test dataset batch by batch
         for images, labels in test_loader:
-            images, labels = images.to(device), labels.to(device)
+            images= images.to(device)
+            labels = labels.to(device)
+            # The output is called logits.
             logits = model(images)
             predictions = logits.argmax(1)
             all_predictions.extend(predictions.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
             loss = criterion(logits, labels)
+            
             test_loss += loss.item() * images.size(0)
             test_correct += (logits.argmax(1) == labels).sum().item()
             test_total += images.size(0)
@@ -550,37 +596,42 @@ for epoch in range(1, NUM_EPOCHS + 1):
     avg_test_loss = test_loss / test_total
 
     # ---------------- EARLY STOPPING CHECK ----------------
-
+    # Check whether the current test loss improved
     if avg_test_loss < best_loss:
-
+        # Save new best loss
         best_loss = avg_test_loss
+        # Reset patience counter
         patience_counter = 0
 
     else:
-
+        # Increase patience counter 
+        # because test loss did not improve
         patience_counter += 1
 
+    # Stop training if the model 
+    # does not improve for multiple epochs
     if patience_counter >= PATIENCE:
-
         print("Early stopping triggered.")
-
         break
     
+    # Reduce learning rate automatically 
+    # when the validation/test loss stops improving
     scheduler.step(avg_test_loss)
+    # Get current learning rate
     current_lr = optimizer.param_groups[0]["lr"]
-
+   
+    # Print training and testing metrics
     print(f"epoch {epoch}/{NUM_EPOCHS} | "
           f"train loss {train_loss / train_total:.4f} "
           f"train acc {train_correct / train_total:.3f} | "
           f"test loss {avg_test_loss:.4f} "
           f"test acc {test_correct / test_total:.3f} | "
           f"lr {current_lr:.1e}")
+    
     # Save metrics for visualization
+    # These values are later used in the accuracy graph
     train_acc_history.append(train_correct / train_total)
     test_acc_history.append(test_correct / test_total)
-    
-
-
 
 # ---------------- ACCURACY GRAPH ----------------
 #accuracy graph shows how the model performance changes during training over multiple epochs.
