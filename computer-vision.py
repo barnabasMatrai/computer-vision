@@ -78,7 +78,7 @@ SEED = 42
 # %80 training, %20 testing
 TEST_RATIO = 0.2
 # batch size defines how many images are processed together in one training step.
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 # epoch means one complete pass through the training dataset.
 NUM_EPOCHS = 50
 # learning rate controls how strongly the model updates its weights during training.
@@ -90,7 +90,11 @@ torch.manual_seed(SEED)
 # code first checks whether MPS is available. If MPS is available, the model uses the Apple GPU for faster training.
 # otherwise, the code switches to CUDA, which is NVIDIA’s GPU acceleration platform commonly used on Windows and Linux systems with NVIDIA graphics cards.
 # using GPU acceleration is important because CNN training requires many mathematical operations, and GPUs can process these operations much faster than CPUs.
-device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
+device = torch.device(
+    "cuda" if torch.cuda.is_available()
+    else "cpu"
+)
+
 print(f"device: {device}")
 
 # ---------------- DATA LOADING ----------------
